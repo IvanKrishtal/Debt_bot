@@ -4,7 +4,14 @@ from datetime import datetime, timedelta
 # * AIOGRAM
 from aiogram import F, types
 from aiogram.filters import Command
-from aiogram.types import Message, BotCommand, BotCommandScopeChat
+from aiogram.types import (
+    Message,
+    BotCommand,
+    BotCommandScopeChat,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -84,7 +91,62 @@ async def all_users_command(message: Message):
 
 
 # * Удаление пользователя
-# TODO добавить функцию удаления пользователя
+class DeleteUser(StatesGroup):
+    confirm = State()
+
+
+@dp.message(Command("del_user"), AdminFilter())
+async def del_user_command(message: Message):
+    users = get_all_users()
+
+    buttons = []
+    for user in users:
+        user_id, name, _ = user
+        buttons.append(
+            [InlineKeyboardButton(text=name, callback_data=f"del_{user_id}")]
+        )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await message.answer("Выбери пользователя для удаления:", reply_markup=keyboard)
+
+
+@dp.callback_query(F.data.startswith("del_"))
+async def confirm_delete(callback: types.CallbackQuery):
+    user_id = int(callback.data.split("_")[1])
+    user = get_user(user_id)
+
+    if not user:
+        await callback.message.edit_text("❌ Пользователь не найден")
+        await callback.answer()
+        return
+
+    buttons = [
+        [
+            InlineKeyboardButton(text="✅ Да", callback_data=f"confirm_{user_id}"),
+            InlineKeyboardButton(text="❌ Нет", callback_data="cancel"),
+        ]
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.message.edit_text(
+        f"Удалить пользователя {user[1]}?", reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("confirm_"))
+async def delete_user_confirm(callback: types.CallbackQuery):
+    user_id = int(callback.data.split("_")[1])
+    del_user(user_id)
+    await set_user_commands(user_id)
+    await callback.message.edit_text("✅ Пользователь удалён")
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "cancel")
+async def cancel_delete(callback: types.CallbackQuery):
+    await callback.message.edit_text("❌ Удаление отменено")
+    await callback.answer()
 
 
 # * Обработчик файлов
