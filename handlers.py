@@ -59,11 +59,12 @@ async def register_start_command(message: Message, state: FSMContext):
 
 
 @dp.message(Registration.name)
-async def register_name_command(message: Message):
+async def register_name_command(message: Message, state: FSMContext):
     user_name = message.text
     user_id = message.from_user.id
     add_user((user_id, user_name))
     await set_user_commands(user_id)
+    await state.clear()
     await message.answer("Поздравляем! Вы зарегестрированы")
 
 
