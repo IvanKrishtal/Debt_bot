@@ -25,7 +25,8 @@ def add_user(user_data: tuple):
     cursor = db.cursor()
 
     cursor.execute(
-        "INSERT INTO Users (id, name) VALUES (?, ?)", (user_data[0], user_data[1])
+        "INSERT OR IGNORE INTO Users (id, name) VALUES (?, ?)",
+        (user_data[0], user_data[1]),
     )
 
     db.commit()

@@ -1,3 +1,9 @@
-from aiogram import Dispatcher
+from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.fsm.storage.memory import MemoryStorage
+from config import BOT_TOKEN, PROXY_URL
 
-dp = Dispatcher()
+session = AiohttpSession(proxy=PROXY_URL)
+bot = Bot(token=BOT_TOKEN, session=session)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)

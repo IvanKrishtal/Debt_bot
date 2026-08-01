@@ -16,7 +16,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 # * КОНФИГИ И ЯДРО БОТА
-from bot import bot
+from dispatcher import bot
 from config import ADMIN_ID, ADMIN_NAME, CHECK_DAYS, DEBT_FLOOR
 from dispatcher import dp
 
@@ -72,7 +72,7 @@ async def register_name_command(message: Message, state: FSMContext):
     add_user((user_id, user_name))
     await set_user_commands(user_id)
     await state.clear()
-    await message.answer("Поздравляем! Вы зарегестрированы")
+    await message.answer("Поздравляем! Вы зарегистрированы")
 
 
 # * Список всех пользователей
@@ -88,6 +88,139 @@ async def all_users_command(message: Message):
     for data in users:
         text += f"Id: {data[0]}\nName: {data[1]}\nDebt: {data[2]}\n\n"
     await message.answer(text)
+
+
+# * Отправка сообщений о долге
+@dp.message(Command("remind"), AdminFilter())
+async def remind_command(message: Message = None):
+    for user_data in get_all_users():
+        if user_data[2] > 0:
+            await bot.send_message(
+                user_data[0], f"🔔 Напоминание:\nВаш долг составляет {user_data[2]} ₽"
+            )
+        if message:
+            await message.answer(f"✅ Уведомления отправлены успешно! ")
+
+
+# * Установление долга пользователю
+class SetDebt(StatesGroup):
+    waiting_new_debt = State()
+
+
+@dp.message(Command("set_debt"), AdminFilter())
+async def set_debt_command(message: Message):
+    users = get_all_users()
+
+    buttons = []
+    for user in users:
+        user_id, name, debt = user
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{name}: {debt}", callback_data=f"set_debt_{user_id}"
+                )
+            ]
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await message.answer(
+            "Выбери пользователя для изменения долга:", reply_markup=keyboard
+        )
+
+
+@dp.callback_query(F.data.startswith("set_debt"))
+async def set_debt_amount(callback: types.CallbackQuery, state: FSMContext):
+    user_id = int(callback.data.split("_")[2])
+    await state.update_data(user_id=user_id)
+    await callback.message.edit_text("Введите сумму нового долга: ")
+    await state.set_state(SetDebt.waiting_new_debt)
+    await callback.answer()
+
+
+@dp.message(SetDebt.waiting_new_debt)
+async def set_debt_save(message: Message, state: FSMContext):
+    try:
+        new_debt = float(message.text)
+    except ValueError:
+        await message.answer("❌ Введи число")
+        return
+
+    data = await state.get_data()
+    user_id = data["user_id"]
+
+    old_debt = get_debt(user_id)[0]
+    name = get_user(user_id)[1]
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text="✅ Да", callback_data=f"confirm_debt_{user_id}_{new_debt}"
+            ),
+            InlineKeyboardButton(text="❌ Нет", callback_data="cancel_debt"),
+        ]
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await message.answer(
+        f"Поменять у {name} долг с {old_debt} ₽ на {new_debt} ₽?", reply_markup=keyboard
+    )
+
+
+@dp.callback_query(F.data.startswith("confirm_debt_"))
+async def confirm_debt(callback: types.CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    user_id = int(parts[2])
+    new_debt = float(parts[3])
+
+    set_debt(user_id, new_debt)
+    await state.clear()
+    await callback.message.edit_text("✅ Долг обновлён")
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "cancel_debt")
+async def cancel_debt(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ Действие отменено")
+    await callback.answer()
+
+
+# * Создание общего расхода — сумма делится между всеми участниками
+class NewExpense(StatesGroup):
+    waiting_amount = State()
+
+
+@dp.message(Command("new_expense"), AdminFilter())
+async def newexpense_start(message: Message, state: FSMContext):
+    await message.answer("Введите сумму расхода:")
+    await state.set_state(NewExpense.waiting_amount)
+
+
+@dp.message(NewExpense.waiting_amount)
+async def newexpense_save(message: Message, state: FSMContext):
+    try:
+        total = float(message.text)
+    except ValueError:
+        await message.answer("❌ Введи число")
+        return
+
+    users = get_all_users()
+    if not users:
+        await message.answer("❌ Нет пользователей")
+        await state.clear()
+        return
+
+    amount_per_user = round(total / len(users), 2)
+
+    for user_id, name, debt in users:
+        new_debt = debt + amount_per_user
+        set_debt(user_id, new_debt)
+        await bot.send_message(
+            user_id, f"🔔 Новый расход!\nНужно оплатить: {new_debt} ₽"
+        )
+
+    await message.answer(f"✅ Расход {total} ₽ распределён на {len(users)} человек")
+    await state.clear()
 
 
 # * Удаление пользователя
@@ -231,19 +364,18 @@ async def set_user_commands(user_id: int):
     elif user_id == ADMIN_ID:
         commands = [
             BotCommand(command="start", description="Запустить бота"),
+            BotCommand(command="new_expense", description="Распределить сумму покупки"),
+            BotCommand(command="remind", description="отправить уведомления"),
             BotCommand(command="mydebt", description="Мой долг"),
             BotCommand(command="all", description="Все должники"),
             BotCommand(command="pay", description="Оплатить долг"),
-            BotCommand(command="help", description="Помощь"),
             BotCommand(command="del_user", description="Удалить пользователя"),
-            BotCommand(command="newexpense", description="Новый расход"),
-            BotCommand(command="set_debt", description="Установить долг"),
+            BotCommand(command="set_debt", description="Установить долг пользователя"),
         ]
     else:
         commands = [
             BotCommand(command="start", description="Запустить бота"),
             BotCommand(command="mydebt", description="Мой долг"),
-            BotCommand(command="all", description="Все должники"),
             BotCommand(command="pay", description="Оплатить долг"),
             BotCommand(command="help", description="Помощь"),
         ]
