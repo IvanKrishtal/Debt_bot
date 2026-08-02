@@ -1,8 +1,6 @@
 import asyncio
 from dispatcher import bot
-from aiogram.client.session.aiohttp import AiohttpSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from config import BOT_TOKEN, PROXY_URL
 from dispatcher import dp
 from handlers import remind_command
 import handlers

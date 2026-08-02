@@ -11,6 +11,8 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     CallbackQuery,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -42,8 +44,17 @@ from parsers import (
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
     user_id = message.from_user.id
-    await set_user_commands(user_id)
-    await message.answer("✅ Бот работает через прокси!")
+    user = get_user(user_id)
+
+    if user is None:
+        await message.answer("👋 Привет! Ты не зарегистрирован. \nНапиши /register")
+        return
+
+    await message.answer(
+        f"👋 Привет, {user[1]}!\n"
+        f"💰 /mydebt - выводит твой долг"
+        "📎 Чтобы оплатить, просто отправь PDF-чек в этот чат."
+    )
 
 
 # * Долг
@@ -244,12 +255,13 @@ async def del_user_command(message: Message):
 
 
 @dp.callback_query(F.data.startswith("del_"))
-async def confirm_delete(callback: types.CallbackQuery):
+async def confirm_delete(callback: types.CallbackQuery, state: FSMContext):
     user_id = int(callback.data.split("_")[1])
     user = get_user(user_id)
 
     if not user:
         await callback.message.edit_text("❌ Пользователь не найден")
+        await state.clear()
         await callback.answer()
         return
 
@@ -268,16 +280,18 @@ async def confirm_delete(callback: types.CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("confirm_"))
-async def delete_user_confirm(callback: types.CallbackQuery):
+async def delete_user_confirm(callback: types.CallbackQuery, state: FSMContext):
     user_id = int(callback.data.split("_")[1])
     del_user(user_id)
     await set_user_commands(user_id)
+    await state.clear()
     await callback.message.edit_text("✅ Пользователь удалён")
     await callback.answer()
 
 
 @dp.callback_query(F.data == "cancel")
-async def cancel_delete(callback: types.CallbackQuery):
+async def cancel_delete(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
     await callback.message.edit_text("❌ Удаление отменено")
     await callback.answer()
 
@@ -368,7 +382,6 @@ async def set_user_commands(user_id: int):
             BotCommand(command="remind", description="отправить уведомления"),
             BotCommand(command="mydebt", description="Мой долг"),
             BotCommand(command="all", description="Все должники"),
-            BotCommand(command="pay", description="Оплатить долг"),
             BotCommand(command="del_user", description="Удалить пользователя"),
             BotCommand(command="set_debt", description="Установить долг пользователя"),
         ]
@@ -376,7 +389,5 @@ async def set_user_commands(user_id: int):
         commands = [
             BotCommand(command="start", description="Запустить бота"),
             BotCommand(command="mydebt", description="Мой долг"),
-            BotCommand(command="pay", description="Оплатить долг"),
-            BotCommand(command="help", description="Помощь"),
         ]
     await bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=user_id))
